@@ -1,6 +1,7 @@
 const cors = require('cors')
 const express = require("express")
 const { MongoClient, ObjectId } = require('mongodb')
+const { createClient } = require('redis')
 const axios = require("axios").default
 
 const app = express()
@@ -19,11 +20,28 @@ const connectToDatabase = async () => {
         const url = `mongodb://${dbConnectionString}/${dbName}`
         const client = new MongoClient(url)
         await client.connect()
-        console.log('connected!')
+        console.log('connected to database!')
         return client.db(dbName)
     }
     catch(error) {
         console.error(error.message)
+        return undefined
+    }
+}
+
+const connectToRedis = async () => {
+    try {
+        const redisServerName = process.env.CACHENAME
+        const redisServerPort = process.env.CACHEPORT ? parseInt(process.env.CACHEPORT) :  6379
+        const client = createClient({
+            url: `redis://${redisServerName}:6379`
+        })
+        client.connect()
+        console.log('connected to cache!')
+        return client
+    }
+    catch (error) {
+        console.error(error)
         return undefined
     }
 }
@@ -34,22 +52,11 @@ const runServer = async () => {
         if (!connection) {
             throw new Error("Unable to connect to database.")
         }
-    
-        app.get('/', async (req, res) => {
-            try {
-        
-                const collection = connection.collection(commentsCollectionName)
-                let comments = await collection
-                    .find({})
-                    .toArray()
-        
-                return res.status(200).json(comments)
-            }
-            catch (error) {
-                console.error(error)
-                return res.status(500).json({"error": error.message})
-            }
-        })
+
+        const redis = await connectToRedis()
+        if (!redis) {
+            throw new Error("Unable to connect to redis.")
+        }
         
         app.post('/', async (req, res) => {
             const payload = req.body
@@ -82,7 +89,7 @@ const runServer = async () => {
             try {
                 const postId = req.params['id']
                 console.log(`Incoming request to return comments associated with post ID #${postId}`)
-=
+
                 const collection = connection.collection(commentsCollectionName)
                 const comments = await collection.find({postId: postId}).toArray()
                 return res.status(200).json(comments)

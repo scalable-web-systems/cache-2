@@ -9,8 +9,10 @@ services:
       - COMMENTS=comments
       - DBCONNECTIONSTRING=mongo
       - DBNAME=db
+      - CACHENAME=postscache
     depends_on:
       - mongo
+      - postscache
     networks:
       - network
   
@@ -23,8 +25,10 @@ services:
       - POSTS=posts
       - DBCONNECTIONSTRING=mongo
       - DBNAME=db
+      - CACHENAME=commentscache
     depends_on:
       - mongo
+      - commentscache
     networks:
       - network
   
@@ -50,6 +54,24 @@ services:
       - ./data:/data/db
     expose:
       - 5000
+    networks:
+      - network
+  
+  postscache:
+    image: redis:latest
+    restart: always
+    expose:
+      - 6379
+    command: redis-server --save 20 1 --loglevel warning --maxmemory-policy allkeys-lru
+    networks:
+      - network
+
+  commentscache:
+    image: redis:latest
+    restart: always
+    expose:
+      - 6379
+    command: redis-server --save 20 1 --loglevel warning --maxmemory-policy allkeys-lru
     networks:
       - network
 

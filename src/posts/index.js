@@ -1,6 +1,7 @@
 const cors = require('cors')
 const express = require("express")
 const { MongoClient, ObjectId } = require('mongodb')
+const { createClient } = require('redis')
 const axios = require('axios').default
 
 
@@ -20,11 +21,28 @@ const connectToDatabase = async () => {
         const url = `mongodb://${dbConnectionString}/${dbName}`
         const client = new MongoClient(url)
         await client.connect()
-        console.log('connected!')
+        console.log('connected to database!')
         return client.db(dbName)
     }
     catch(error) {
         console.error(error.message)
+        return undefined
+    }
+}
+
+const connectToRedis = async () => {
+    try {
+        const redisServerName = process.env.CACHENAME
+        const redisServerPort = process.env.CACHEPORT ? parseInt(process.env.CACHEPORT) :  6379
+        const client = createClient({
+            url: `redis://${redisServerName}:6379`
+        })
+        client.connect()
+        console.log('connected to cache!')
+        return client
+    }
+    catch (error) {
+        console.error(error)
         return undefined
     }
 }
@@ -35,6 +53,11 @@ const runServer = async () => {
         const connection = await connectToDatabase()
         if (!connection) {
             throw new Error("Unable to connect to database.")
+        }
+
+        const redis = await connectToRedis()
+        if (!redis) {
+            throw new Error("Unable to connect to redis.")
         }
     
         app.get('/', async (req, res) => {
@@ -72,11 +95,19 @@ const runServer = async () => {
                 const oid = new ObjectId(_id)
                 console.log(`Incoming request to find post with ID #${_id}`)
 
-                const collection = connection.collection(postsCollection)
-                let post = await collection
-                    .findOne({_id: oid})
-                
-                console.log(post)
+                let post = await redis.hGetAll(_id)
+                if (!post || (post && Object.keys(post).length === 0)) {
+                    console.log('cache miss!')
+                    const collection = connection.collection(postsCollection)
+                    post = await collection
+                        .findOne({_id: oid})
+                    console.log('writing to the cache')
+                    await redis.hSet(_id, post)
+                    console.log(`Post with ID #${_id} successfully written to the database`)
+                }
+                else {
+                    console.log(`returning from the cache, the post with ID #${post._id}`)
+                }
                 return res.status(post ? 200 : 404).json(post)
             }
             catch (error) {
