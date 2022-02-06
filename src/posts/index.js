@@ -35,14 +35,14 @@ const connectToRedis = async () => {
         const redisServerName = process.env.CACHENAME
         const redisServerPort = process.env.CACHEPORT ? parseInt(process.env.CACHEPORT) :  6379
         const client = createClient({
-            url: `redis://${redisServerName}:6379`
+            url: `redis://${redisServerName}:${redisServerPort}`
         })
         client.connect()
         console.log('connected to cache!')
         return client
     }
     catch (error) {
-        console.error(error)
+        console.error(error) 
         return undefined
     }
 }
@@ -95,22 +95,24 @@ const runServer = async () => {
                 const oid = new ObjectId(_id)
                 console.log(`Incoming request to find post with ID #${_id}`)
 
-                let post = await redis.hGetAll(_id)
-                if (!post || (post && Object.keys(post).length === 0)) {
+                let post = await redis.get(_id)
+                if (!post) {
                     console.log('cache miss!')
                     const collection = connection.collection(postsCollection)
                     post = await collection
                         .findOne({_id: oid})
                     console.log('writing to the cache')
-                    await redis.hSet(_id, post)
+                    await redis.set(_id, JSON.stringify(post))
                     console.log(`Post with ID #${_id} successfully written to the database`)
                 }
                 else {
+                    post = JSON.parse(post)
                     console.log(`returning from the cache, the post with ID #${post._id}`)
                 }
                 return res.status(post ? 200 : 404).json(post)
             }
             catch (error) {
+                console.log(error.message)
                 return res.status(500).json({"error": error.message})
             }
         })

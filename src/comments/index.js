@@ -10,7 +10,7 @@ app.use(express.json())
 const port = process.env.port || 5000
 const commentsCollectionName = `comments`
 
-const connectToDatabase = async () => {
+const connectToDatabase = async () =>  {
     try {
         const dbConnectionString = process.env.DBCONNECTIONSTRING
         const dbName = process.env.DBNAME
@@ -34,7 +34,7 @@ const connectToRedis = async () => {
         const redisServerName = process.env.CACHENAME
         const redisServerPort = process.env.CACHEPORT ? parseInt(process.env.CACHEPORT) :  6379
         const client = createClient({
-            url: `redis://${redisServerName}:6379`
+            url: `redis://${redisServerName}:${redisServerPort}`
         })
         client.connect()
         console.log('connected to cache!')
@@ -77,6 +77,16 @@ const runServer = async () => {
                 
                 const collection = connection.collection(commentsCollectionName)
                 const comment = await collection.insertOne(payload)
+                let cachedComments = await redis.get(postId)
+                if (!cachedComments) {
+                    console.log(`Inserting a new record for comments with post with ID #${postId} into the cache`)
+                    await redis.set(postId, JSON.stringify([{...payload, _id: comment.insertedId}]))
+                } else {
+                    cachedComments = JSON.parse(cachedComments)
+                    cachedComments.push({...payload, _id: comment.insertedId})
+                    await redis.set(postId, JSON.stringify(cachedComments))
+                    console.log(`updating the cache, setting comments for post with ID #${postId}`)
+                }
                 return res.status(201).json(comment)
             }
             catch (error) {
@@ -90,9 +100,19 @@ const runServer = async () => {
                 const postId = req.params['id']
                 console.log(`Incoming request to return comments associated with post ID #${postId}`)
 
-                const collection = connection.collection(commentsCollectionName)
-                const comments = await collection.find({postId: postId}).toArray()
-                return res.status(200).json(comments)
+                let cachedComments = await redis.get(postId)
+                if (!cachedComments || (cachedComments && cachedComments.length === 0)) {
+                    console.log('cache miss')
+                    const collection = connection.collection(commentsCollectionName)
+                    cachedComments = await collection.find({postId: postId}).toArray()
+                    await redis.set(postId, JSON.stringify(cachedComments))
+                    console.log(`comments for post with ID #${postId} successfully written to cache.`)
+                } else {
+                    console.log('Returning from cache.')
+                    cachedComments = JSON.parse(cachedComments)
+                }
+
+                return res.status(200).json(cachedComments)
             }
             catch(error) {
                 console.error(error)
